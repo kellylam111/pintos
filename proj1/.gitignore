@@ -1,0 +1,6 @@
+# Generated files
+*~
+*.o
+
+# OS X
+*.DS_Store

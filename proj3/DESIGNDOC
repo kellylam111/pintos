@@ -1,0 +1,318 @@
+		     +--------------------------+
+       	     |			CS 140			|
+		     | PROJECT 2: USER PROGRAMS	|
+		     | 	   DESIGN DOCUMENT     	|
+		     +--------------------------+
+
+---- GROUP ----
+
+>> Fill in the names and email addresses of your group members.
+
+Marcus Eng <marcuste@usc.edu>
+
+---- PRELIMINARIES ----
+
+>> If you have any preliminary comments on your submission, notes for the
+>> TAs, or extra credit, please give them here.
+
+	IGNORE
+	***I have an issue where the args are not being properly set for SYS_READ and
+	SYS_WRITE in the interrupt frame given to the syscall_handler. I implemented
+	a workaround by doing a memcpy of the args later in the stack.***
+
+	Above issue was resolved by basing my project from pintos-base, not the one in the
+	VM. Would've been helpful to know there was a discrepancy between the two. 
+
+>> Please cite any offline or online sources you consulted while
+>> preparing your submission, other than the Pintos documentation, course
+>> text, lecture notes, and course staff.
+
+			   ARGUMENT PASSING
+			   ================
+
+---- DATA STRUCTURES ----
+
+>> A1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+	Nothing global was added. I created a 'push_args' function that took
+	the esp pointer, the file_name, and the pointer for the tokens. Within
+	this function, there are local variables used to hold the arguments
+	while they are being pushed onto the user stack.
+
+---- ALGORITHMS ----
+
+>> A2: Briefly describe how you implemented argument parsing.  How do
+>> you arrange for the elements of argv[] to be in the right order?
+>> How do you avoid overflowing the stack page?
+
+	My argument passing is done almost exactly as it is described on Piazza.
+	I have two arrays, one to hold the actual argument and one to hold the
+	address where that argument will be on the stack.
+	
+	First, I decrement ESP by the length of the argument plus one,
+	push that argument on that stack, store the address, and then go to the next
+	argument.
+
+	After, I word align by modding the current address by 4 then shifting
+	(subtracting from ESP) the difference. After, I push the null sentinel by
+	pushing a null of length char *.
+
+	Next, I push the saved pointers to these arguments onto the user stack (in order).
+	Then I copy the argument count (argc) to the stack so argc is known. Finally,
+	I push in the void(*), onto the stack then leave my function.
+
+	Because these are local placeholders, they should be deleted as soon as the function
+	returns and ESP should have the pushed args. If the user stack becomes overloaded because
+	of too many arguments, it should exit with error (-1).
+
+---- RATIONALE ----
+
+>> A3: Why does Pintos implement strtok_r() but not strtok()?
+
+	It takes an extra parameter to maintain the position of the tokens and
+	won't need to be saved in the global static buffer. This way, strtok_r
+	is thread safe. Every new call to strtok_r with the same pointer
+	will increment it to the next token (until it reaches the end).
+
+>> A4: In Pintos, the kernel separates commands into a executable name
+>> and arguments.  In Unix-like systems, the shell does this
+>> separation.  Identify at least two advantages of the Unix approach.
+	
+	The shell can support multiple commands and chain them, allowing for the
+	output for one executable to be the input of another (piping). Trying to chain
+	together commands in the kernel could be interpreted as having the 
+	second command being an argument of the first command.
+
+	Another advantage is that the shell can use aliases/variables for commands
+	and files that can be expanded before being handed to the kernel.
+	This could save the end-user from having to type out the entire path
+	or name for a given executable.
+	
+
+			     SYSTEM CALLS
+			     ============
+
+---- DATA STRUCTURES ----
+
+>> B1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+THREAD
+    struct thread *parent;              Pointer to the parent thread.
+    struct list child_processes;        List of child processes
+    struct list_elem child_elem;        List element for child process.
+    struct file *executable;            Pointer to executable file.
+    int return_status;                  Return status of this thread
+    bool loaded;                        Boolean if program has been loaded.
+    bool waiting;                       Boolean if parent process has called wait already.
+    bool exited;                        Boolean if process has already exited.
+    struct semaphore load_semaphore;    Semaphore to wait on if process hasn't loaded.
+    struct semaphore wait_semaphore;    Semaphore to wait on if process hasn't completed.
+    struct semaphore exit_semaphore;    Semaphore for exiting process.
+
+SYSCALL
+	struct lock file_lock			Lock so that only one read/write is done at a given time
+	struct list files				List of files currently open
+	struct file_elem 				Wrapper for the kernel to keep track of files
+	  {
+	    pid_t holder;               PID of process holding the file.
+	    int fd;                     File's file descriptor.
+	    struct file* file;          Pointer to actual file.
+	    struct list_elem elem;      List element for file
+	  };
+
+>> B2: Describe how file descriptors are associated with open files.
+>> Are file descriptors unique within the entire OS or just within a
+>> single process?
+
+	When a file is opened with filesys_open, a pointer to the file struct
+	is returned. My file_elem struct is a wrapper that takes this pointer
+	as well as a pointer to the thread who opened it and a file descriptor.
+	A file descriptor is generated by looking at the last element in the
+	list of open files and then adding one to the last file's file desciptor.
+	The descriptors should be unique within the entire OS.
+
+---- ALGORITHMS ----
+
+>> B3: Describe your code for reading and writing user data from the
+>> kernel.
+
+	I use a function that maps the pointers from the user program
+	to the corresponding address in the kernel. I get the current
+	running thread's pagedir and call pagedir_get_page which gets the mapped
+	virtual memory. I also check to make sure the pointer that I am
+	mapping from is valid (below PHYS_BASE) with the is_user_vaddr
+	function.
+
+>> B4: Suppose a system call causes a full page (4,096 bytes) of data
+>> to be copied from user space into the kernel.  What is the least
+>> and the greatest possible number of inspections of the page table
+>> (e.g. calls to pagedir_get_page()) that might result?  What about
+>> for a system call that only copies 2 bytes of data?  Is there room
+>> for improvement in these numbers, and how much?
+
+	/***TODO***/
+
+>> B5: Briefly describe your implementation of the "wait" system call
+>> and how it interacts with process termination.
+
+	I use two semaphores (initiated to 0) and two booleans (initiated to
+	false) in the thread's definition, wait_semaphore, exit_semaphore,
+	waiting, and exited. When process_wait is called on a thread,
+	I grab the current thread and the thread to be waited on.
+	I check if the child thread has been already called to be waited on
+	and if the child process is a child of the current process.
+
+	If the child process has already exited (with exited set to true),
+	I return the child's return status. If not, I call sema_down on the
+	child's wait_semaphore so the parent thread can wait on the child.
+	When the child process/thread is exiting, it sets the return status,
+	calls sema_up on its wait_semaphore, then calls down on its exit_semaphore
+	to give the parents thread the chance to get the return status. After
+	the parents process gets the return status of the child, it calls sema_up
+	on the child's exit_semaphore to allow the child to finish the exit process.
+
+>> B6: Any access to user program memory at a user-specified address
+>> can fail due to a bad pointer value.  Such accesses must cause the
+>> process to be terminated.  System calls are fraught with such
+>> accesses, e.g. a "write" system call requires reading the system
+>> call number from the user stack, then each of the call's three
+>> arguments, then an arbitrary amount of user memory, and any of
+>> these can fail at any point.  This poses a design and
+>> error-handling problem: how do you best avoid obscuring the primary
+>> function of code in a morass of error-handling?  Furthermore, when
+>> an error is detected, how do you ensure that all temporarily
+>> allocated resources (locks, buffers, etc.) are freed?  In a few
+>> paragraphs, describe the strategy or strategies you adopted for
+>> managing these issues.  Give an example.
+
+	I modularize the difference checks to make the code as clean as possible.
+	Before a specific syscall, I check to make sure the given argument is valid
+	by calling my validate_address function. Additionally, if I need to check
+	if an entire buffer is valid, I check the start and end pointers for the buffer
+	to ensure their validity.
+
+	Whenever there is a error that requires the program to terminate, I call exit (-1)
+	where necessary. This calls the appropriate cleaning up for the given thread/process.
+	For example, for many of the functions within process.c, there are a lot of checks
+	to ensure that the intended tasks complete, and if they don't, then the allocated
+	resources are removed. I build off of this to make sure that the allocated variables
+	I use are removed in case there is something wrong with the initialization process.
+	Doing this cleanup on the fly allows me to only consider the normal case when
+	exit is called. This way, I can just focus on removing certain variables there.
+
+	There may be a problem with my memory cleanup if the process or program were to
+	terminate such as lose power because the proper memory cleanup wouldn't be reached. 
+
+---- SYNCHRONIZATION ----
+
+>> B7: The "exec" system call returns -1 if loading the new executable
+>> fails, so it cannot return before the new executable has completed
+>> loading.  How does your code ensure this?  How is the load
+>> success/failure status passed back to the thread that calls "exec"?
+
+	The thread struct has a load semaphore and boolean to keep track of
+	the exec/load status. When the syscall exec is called, I call
+	process execute and get the process ID from what is returned. If that
+	is null, I return -1. If it doesn't error, I call sema_down on the
+	new process/thread's load_semaphore so that the calling thread
+	waits for the load process to complete. Sema_up is called on
+	the load_semaphore only after the executable has been loaded (whether
+	successful or failed). If it is successful, the loaded boolean is
+	set to true. Back in the syscall exec, I check if new processes loaded
+	boolean is set, return -1 if false or the process ID if true.
+
+>> B8: Consider parent process P with child process C.  How do you
+>> ensure proper synchronization and avoid race conditions when P
+>> calls wait(C) before C exits?  After C exits?  How do you ensure
+>> that all resources are freed in each case?  How about when P
+>> terminates without waiting, before C exits?  After C exits?  Are
+>> there any special cases?
+
+	There are a few checks at the beginning of the process_wait function
+	that ensure the thread can continue with the wait process. Specifically,
+	if C is not null, C is a child of P, and C hasn't been called wait on
+	already.
+
+	If C exits, it clears out its parent pointer and calls up on its
+	wait_semaphore (so that the parent, if it were to call wait on the
+	C, would either return -1 or just proceed all the way through without
+	stopping).
+
+	If P terminates before C exits, P should call up on the C's wait_semaphore
+	as well as remove itself as the parent of the C (in thread_exit). This 
+	allows for C to become its own "independent" thread with no parent process.
+
+	If C exits, it calls up on its wait_semaphore so that the parent process
+	can fetch its return status immediately. It would wait on the exit semaphore
+	before properly terminating. All clean up is handled within the thread_exit
+	function.
+
+---- RATIONALE ----
+
+>> B9: Why did you choose to implement access to user memory from the
+>> kernel in the way that you did?
+
+	I used the built in function is_user_vaddr to make sure that
+	the pointer is below PHYS_BASE. Then I use another built in 
+	method pagedir_get_page to make sure the virtual address is
+	mapped. I use these functions because they are already 
+	implemented, making my code simpler. Additionally, if a 
+	buffer of data is needed, I make sure that the start
+	and end of the buffer are valid. If at any time there is 
+	an invalid pointer given, I terminate the program with a -1
+	error.
+
+>> B10: What advantages or disadvantages can you see to your design
+>> for file descriptors?
+
+	Advantage: 
+		Simple, I simply look at the last element in the list
+		of open files and increment from there.
+	Disadvantage:
+		Slow: depending on the implementation on how long it takes
+		to get the last opened file, may have to run through the entire
+		list. Additionally, closing a file may require running through
+		the entire list of opened files.
+
+>> B11: The default tid_t to pid_t mapping is the identity mapping.
+>> If you changed it, what advantages are there to your approach?
+
+	I did not change the mapping.
+
+			   SURVEY QUESTIONS
+			   ================
+
+Answering these questions is optional, but it will help us improve the
+course in future quarters.  Feel free to tell us anything you
+want--these questions are just to spur your thoughts.  You may also
+choose to respond anonymously in the course evaluations at the end of
+the quarter.
+
+>> In your opinion, was this assignment, or any one of the three problems
+>> in it, too easy or too hard?  Did it take too long or too little time?
+
+	The assignment itself wasn't too difficult. The only problem I had
+	was the kernel buffer not being properly set in the interrupt frame.
+	It took 4 days for me to create a workaround for this and continue
+	on with the rest of the assignment.
+
+>> Did you find that working on a particular part of the assignment gave
+>> you greater insight into some aspect of OS design?
+
+	Yes
+
+>> Is there some particular fact or hint we should give students in
+>> future quarters to help them solve the problems?  Conversely, did you
+>> find any of our guidance to be misleading?
+
+	The initial slides, while helpful, did not really provide a thorough
+	outline of the entire assignment.
+
+>> Do you have any suggestions for the TAs to more effectively assist
+>> students, either for future quarters or the remaining projects?
+
+>> Any other comments?
